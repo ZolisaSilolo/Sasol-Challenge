@@ -1,0 +1,20 @@
+seed: 42
+data:
+  raw_path: "data/raw/"
+  processed_path: "data/processed/"
+  train_file: "data/raw/train.csv"
+  test_file: "data/raw/test.csv"
+  sub_file: "data/raw/SampleSubmission.csv"
+
+features:
+  rolling_windows: [14, 30, 60, 90, 180]
+  
+models:
+  lgbm_params:
+    objective: "regression"
+    metric: "rmse"
+    random_state: 42
+    n_estimators: 1000
+    learning_rate: 0.05
+    colsample_bytree: 0.8
+    subsample: 0.8

@@ -1,0 +1,19 @@
+# Byte-compiled / cache files
+__pycache__/
+*.py[cod]
+*$py.class
+*.log
+
+# CatBoost / model logs
+catboost_info/
+
+# Large Datasets (GitHub rejects >100MB and warns on >50MB)
+data/raw/train.csv
+data/processed/*.csv
+*.zip
+
+# OS / Editor files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
