@@ -3,13 +3,33 @@ __pycache__/
 *.py[cod]
 *$py.class
 *.log
+.pytest_cache/
+.venv/
 
-# CatBoost / model logs
+# Secrets / local cloud config
+.env
+.gcp_state
+
+# Data: raw transactions and all derived artefacts stay out of git.
+# The small authoritative competition files are whitelisted below.
+data/raw/*
+!data/raw/label_rules.py
+!data/raw/label_config.json
+!data/raw/DATA_DICTIONARY.md
+!data/raw/LABEL_RULES.md
+!data/raw/test.csv
+!data/raw/SampleSubmission.csv
+data/processed/*
+!data/processed/.gitkeep
+
+# Model artefacts
+models/*.pkl
+models/*.cbm
+models/*.json
+models/*.txt
 catboost_info/
 
-# Large Datasets (GitHub rejects >100MB and warns on >50MB)
-data/raw/train.csv
-data/processed/*.csv
+# Bundles / archives
 *.zip
 
 # OS / Editor files
@@ -17,3 +37,4 @@ data/processed/*.csv
 .idea/
 .DS_Store
 Thumbs.db
+.adk/
