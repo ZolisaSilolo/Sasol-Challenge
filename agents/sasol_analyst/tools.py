@@ -2,25 +2,37 @@ import csv
 import json
 import os
 from pathlib import Path
+import subprocess
 from typing import Any, Dict
 import pandas as pd
 
 RAW_DATA_PATH = os.path.join(os.path.dirname(__file__), "../../data/raw")
 
 
-def get_dataset_overview() -> Dict[str, Any]:
+def get_dataset_overview(sample_rows: int = 10000) -> Dict[str, Any]:
     """Inspects the local Sasol training dataset and returns key dataset statistics.
 
+    Respects the competition data dictionary by aggregating whole basket totals
+    (TransactionTotalInclAmount) strictly per unique TransactionId rather than
+    summing across line items.
+
+    Args:
+        sample_rows (int): Number of line items to sample for fast overview stats.
+                           Defaults to 10000.
+
     Returns:
-        dict: A dictionary containing row counts, headers, transaction categories,
-              and sample monetary sums.
+        dict: Dataset statistics including unique baskets, unique customers (ID),
+              categories, and deduplicated basket monetary sums.
     """
     train_path = os.path.join(RAW_DATA_PATH, "train.csv")
     if not os.path.exists(train_path):
         return {"status": "error", "message": "train.csv not found locally"}
 
-    categories = set()
-    total_sample_amount = 0.0
+    categories_l1 = set()
+    categories_l2 = set()
+    unique_baskets = {}
+    unique_customers = set()
+    line_total_excl = 0.0
     row_count = 0
 
     with open(train_path, mode="r", encoding="utf-8", errors="replace") as f:
@@ -28,39 +40,100 @@ def get_dataset_overview() -> Dict[str, Any]:
         headers = reader.fieldnames or []
         for row in reader:
             row_count += 1
-            cat = row.get("ItemCategoryLevel1")
-            if cat:
-                categories.add(cat)
+            cid = row.get("ID")
+            if cid:
+                unique_customers.add(cid)
+
+            tx_id = row.get("TransactionId")
+            if tx_id and tx_id not in unique_baskets:
+                try:
+                    unique_baskets[tx_id] = float(row.get("TransactionTotalInclAmount", 0))
+                except (ValueError, TypeError):
+                    pass
+
             try:
-                amt = float(row.get("TransactionTotalInclAmount", 0))
-                total_sample_amount += amt
+                line_total_excl += float(row.get("TotalExclAmount", 0))
             except (ValueError, TypeError):
                 pass
-            if row_count >= 1000:
+
+            cat1 = row.get("ItemCategoryLevel1")
+            if cat1:
+                categories_l1.add(cat1)
+            cat2 = row.get("ItemCategoryLevel2")
+            if cat2:
+                categories_l2.add(cat2)
+
+            if row_count >= sample_rows:
                 break
+
+    basket_total_sum = sum(unique_baskets.values())
 
     return {
         "dataset": "Sasol CLV Train Dataset",
-        "sample_analyzed_rows": row_count,
+        "sample_lines_analyzed": row_count,
+        "unique_baskets_in_sample": len(unique_baskets),
+        "unique_customers_in_sample": len(unique_customers),
         "total_columns": len(headers),
         "columns": headers,
-        "categories_level1": sorted(list(categories)),
-        "sample_total_amount_sum": round(total_sample_amount, 2),
+        "categories_level1": sorted(list(categories_l1)),
+        "categories_level2_count": len(categories_l2),
+        "deduplicated_basket_total_incl_sum": round(basket_total_sum, 2),
+        "line_items_total_excl_sum": round(line_total_excl, 2),
+        "note": "Aggregated TransactionTotalInclAmount strictly per unique TransactionId per DATA_DICTIONARY.md rules.",
     }
 
 
-def get_cloud_storage_status() -> Dict[str, str]:
-    """Checks the Google Cloud Storage bucket destination and cloud dataset status.
+def get_cloud_storage_status(bucket_uri: str = "gs://sasol-train-dataset/") -> Dict[str, Any]:
+    """Dynamically checks Google Cloud Storage bucket contents and artifact status using gcloud CLI.
+
+    Executes a live query to verify bucket connectivity, list stored objects, and check sizes.
+
+    Args:
+        bucket_uri (str): Cloud Storage bucket URI to inspect. Defaults to "gs://sasol-train-dataset/".
 
     Returns:
-        dict: Information on the cloud storage location, bucket URI, and file verification.
+        dict: Live bucket status, detected objects, total size, and raw output from GCS.
     """
-    return {
-        "bucket_uri": "gs://sasol-train-dataset/",
-        "training_file": "gs://sasol-train-dataset/train.csv",
-        "file_size": "70.46 MiB (73,879,714 bytes)",
-        "status": "Ready & verified on Google Cloud Storage",
-    }
+    try:
+        res = subprocess.run(
+            ["gcloud", "storage", "ls", "--long", bucket_uri],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        if res.returncode != 0:
+            return {
+                "status": "ERROR",
+                "bucket_uri": bucket_uri,
+                "error": res.stderr.strip() or "Failed to list bucket contents",
+            }
+
+        lines = [line.strip() for line in res.stdout.splitlines() if line.strip()]
+        objects = []
+        for line in lines:
+            if line.startswith("TOTAL:"):
+                continue
+            parts = line.split()
+            if len(parts) >= 3 and parts[-1].startswith("gs://"):
+                objects.append({"size_bytes": parts[0], "updated": parts[1], "uri": parts[2]})
+            elif len(parts) == 1 and parts[0].startswith("gs://"):
+                objects.append({"uri": parts[0], "type": "prefix_or_directory"})
+
+        raw_totals = [l for l in lines if l.startswith("TOTAL:")]
+
+        return {
+            "status": "LIVE_VERIFIED",
+            "bucket_uri": bucket_uri,
+            "object_count": len(objects),
+            "objects": objects,
+            "summary": raw_totals[0] if raw_totals else "Objects detected",
+        }
+    except Exception as e:
+        return {
+            "status": "ERROR",
+            "bucket_uri": bucket_uri,
+            "error": str(e),
+        }
 
 
 def inspect_label_rules() -> Dict[str, Any]:
@@ -99,6 +172,46 @@ def inspect_label_rules() -> Dict[str, Any]:
         result["label_rules_md"] = f"File not found at {rules_md_path}"
 
     return result
+
+
+def inspect_pipeline_metrics(filepath: str = "submissions/oof_metrics_fast.json") -> Dict[str, Any]:
+    """Reads and returns out-of-fold and out-of-time cross-validation metrics generated by the training pipeline.
+
+    Use this tool to evaluate baseline/model performance, check RMSE per target,
+    inspect weighted F1 on Opportunity, and review composite loss and blend weights.
+
+    Args:
+        filepath (str): Relative path to the metrics JSON file. Defaults to "submissions/oof_metrics_fast.json".
+
+    Returns:
+        dict: Parsed pipeline evaluation metrics including OOT scores, OOF scores, and model blend weights.
+    """
+    path = Path(filepath)
+    if not path.exists():
+        candidate = Path(__file__).resolve().parents[2] / filepath
+        if candidate.exists():
+            path = candidate
+
+    if not path.exists():
+        return {
+            "status": "ERROR",
+            "message": f"Metrics file not found at {path}",
+            "available_metric_files": [str(p) for p in Path("submissions").glob("*metrics*.json")] if Path("submissions").exists() else [],
+        }
+
+    data = json.loads(path.read_text(encoding="utf-8"))
+    return {
+        "status": "SUCCESS",
+        "filepath": str(path),
+        "config": data.get("config"),
+        "n_features": data.get("n_features"),
+        "oot_metrics": data.get("oot", {}).get("metrics", {}),
+        "oof_summary": data.get("final", {}).get("oof", {}),
+        "fuel_blends": data.get("final", {}).get("fuel", {}).get("blend_weights", {}),
+        "nonfuel_blends": data.get("final", {}).get("nonfuel", {}).get("blend_weights", {}),
+        "opportunity_blends": data.get("final", {}).get("opportunity", {}).get("blend_weights", {}),
+        "submission_summary": data.get("submission", {}),
+    }
 
 
 def audit_submission_file(filepath: str = "submissions/submission_baseline.csv") -> Dict[str, Any]:
