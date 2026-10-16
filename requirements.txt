@@ -1,11 +1,17 @@
-polars>=0.20.0
-numpy>=1.26.0
-pandas>=2.0.0
-scikit-learn>=1.3.0
-lightgbm>=4.0.0
-catboost>=1.2.0
-xgboost>=2.0.0
-scipy>=1.11.0
-pyyaml>=6.0
-torch>=2.1.0
-sentence-transformers>=2.2.0
+# Pinned to the versions the local test suite is verified against.
+# No AutoML packages permitted (competition rule).
+numpy==2.5.3
+pandas==3.0.6
+polars==2.0.0
+pyarrow==26.0.0
+scikit-learn==1.9.1
+scipy==1.18.1
+lightgbm==4.7.0
+catboost==1.2.10
+xgboost==3.4.1
+optuna==5.0.0
+pyyaml==6.0.3
+torch==2.14.1
+transformers==5.19.0
+sentence-transformers==6.1.0
+pytest==9.1.1

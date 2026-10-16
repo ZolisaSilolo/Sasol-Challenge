@@ -1,20 +1,81 @@
+# Production config (GCE GPU VM). Device placement is automatic:
+# CatBoost task_type=GPU and XGBoost device=cuda when a GPU is visible, CPU otherwise.
 seed: 42
-data:
-  raw_path: "data/raw/"
-  processed_path: "data/processed/"
-  train_file: "data/raw/train.csv"
-  test_file: "data/raw/test.csv"
-  sub_file: "data/raw/SampleSubmission.csv"
+
+paths:
+  raw_dir: data/raw
+  processed_dir: data/processed
+  sub_dir: submissions
+  sub_filename: submission.csv
+  metrics_filename: oof_metrics.json
+
+cohorts:
+  # null -> label_config.json "calibration_cutoffs" (2024-09-01 ... 2025-09-01).
+  label_cutoffs: null
+  # Optional month-start augmentation cohorts, e.g. ["2025-01-01", "2025-02-01"].
+  extra_monthly_cutoffs: []
+  test_cutoff: "2025-12-01"
+  # Per-quarter sample-weight decay for older cohorts (1.0 = equal weight).
+  recency_weight_decay: 1.0
+
+validation:
+  n_splits: 5          # GroupKFold on customer ID across all pooled cohorts
+  oot: true            # hold out latest labelled cohort (purged) as out-of-time benchmark
+
+submission:
+  expected_rows: 5488
 
 features:
-  rolling_windows: [14, 30, 60, 90, 180]
-  
-models:
-  lgbm_params:
-    objective: "regression"
-    metric: "rmse"
-    random_state: 42
-    n_estimators: 1000
-    learning_rate: 0.05
-    colsample_bytree: 0.8
-    subsample: 0.8
+  windows: [7, 14, 30, 60, 90, 180]
+  slope_buckets: 6
+
+embeddings:
+  enabled: true
+  backend: auto                     # auto | sentence_transformers | tfidf
+  model_name: BAAI/bge-small-en-v1.5
+  n_components: 16
+  batch_size: 256
+  half_life_days: 30
+
+heads:
+  fuel:
+    engines:
+      lgbm: {n_estimators: 1500, learning_rate: 0.02, num_leaves: 63, min_child_samples: 40, objective: regression}
+      catboost: {iterations: 2500, learning_rate: 0.04, depth: 7}
+      xgboost: {n_estimators: 1500, learning_rate: 0.02, max_depth: 7}
+    aux_huber:
+      engine: lgbm
+      params: {n_estimators: 1500, learning_rate: 0.02, num_leaves: 63, alpha: 0.9}
+
+  nonfuel:
+    engines:
+      lgbm: {n_estimators: 1500, learning_rate: 0.02, num_leaves: 63, min_child_samples: 40}
+      catboost: {iterations: 2500, learning_rate: 0.04, depth: 7}
+      xgboost: {n_estimators: 1500, learning_rate: 0.02, max_depth: 7}
+    hurdle:
+      calibrate: true
+      classifier_engines: [lgbm, xgboost]
+      regressor_engines: [catboost, lgbm]
+      classifier_params:
+        lgbm: {n_estimators: 800, learning_rate: 0.03}
+        xgboost: {n_estimators: 800, learning_rate: 0.03, max_depth: 6}
+      regressor_params:
+        catboost: {iterations: 2000, learning_rate: 0.04, depth: 7}
+        lgbm: {n_estimators: 1200, learning_rate: 0.02}
+
+  opportunity:
+    # Optional inverse-frequency sample weighting (0 = off; class multipliers handle imbalance).
+    class_weight_power: 0.0
+    engines:
+      lgbm: {n_estimators: 800, learning_rate: 0.03, num_leaves: 31, min_child_samples: 30}
+      catboost: {iterations: 1500, learning_rate: 0.06, depth: 6}
+      xgboost: {n_estimators: 800, learning_rate: 0.03, max_depth: 6}
+
+postprocessing:
+  class_weights:
+    enabled: true
+    lo: 0.2
+    hi: 5.0
+    grid_size: 25
+    max_passes: 3
+    method: coordinate   # coordinate | powell (coordinate ascent then bounded Powell refinement)

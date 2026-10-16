@@ -1,0 +1,18 @@
+# Installed on the GCE Deep Learning VM.
+# torch is intentionally NOT listed: on the GPU DLVM the venv reuses the image's CUDA-matched
+# build (--system-site-packages); in CPU mode remote_bootstrap.sh installs the CPU wheel.
+# xgboost and catboost PyPI wheels include CUDA support; LightGBM runs on CPU.
+numpy==2.5.3
+pandas==3.0.6
+polars==2.0.0
+pyarrow==26.0.0
+scikit-learn==1.9.1
+scipy==1.18.1
+lightgbm==4.7.0
+catboost==1.2.10
+xgboost==3.4.1
+optuna==5.0.0
+pyyaml==6.0.3
+transformers==5.19.0
+sentence-transformers==6.1.0
+pytest==9.1.1

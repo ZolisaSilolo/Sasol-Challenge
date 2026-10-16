@@ -38,3 +38,8 @@ catboost_info/
 .DS_Store
 Thumbs.db
 .adk/
+
+# Local run outputs (backed up via make sessions-push)
+logs/
+submissions/*
+!submissions/.gitkeep

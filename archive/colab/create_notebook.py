@@ -546,14 +546,16 @@ def build_notebook():
             "rmse_fuel = np.sqrt(mean_squared_error(y_fuel_val, p_fuel_val))\n",
             "rmse_nonfuel = np.sqrt(mean_squared_error(y_nonfuel_val, p_nonfuel_val))\n",
             "f1_opp = f1_score(y_opp_val, p_opp_val, average='weighted')\n",
-            "composite = (rmse_fuel + rmse_nonfuel) - f1_opp\n",
+            "composite_loss = (rmse_fuel + rmse_nonfuel) + (1.0 - f1_opp)\n",
+            "composite_raw = (rmse_fuel + rmse_nonfuel) - f1_opp\n",
             "\n",
             "print(\"=\" * 50)\n",
             "print(\"OUT-OF-TIME VALIDATION PERFORMANCE (2025-09 SNAPSHOT):\")\n",
-            "print(f\"  CLV Fuel RMSE:           {rmse_fuel:.4f}\")\n",
-            "print(f\"  CLV Non-Fuel RMSE:       {rmse_nonfuel:.4f}\")\n",
-            "print(f\"  Opportunity Weighted F1: {f1_opp:.4f}\")\n",
-            "print(f\"  COMPOSITE BENCHMARK:     {composite:.4f}\")\n",
+            "print(f\"  CLV Fuel RMSE:                 {rmse_fuel:.4f}\")\n",
+            "print(f\"  CLV Non-Fuel RMSE:             {rmse_nonfuel:.4f}\")\n",
+            "print(f\"  Opportunity Weighted F1:       {f1_opp:.4f}\")\n",
+            "print(f\"  COMPOSITE LOSS (LOWER=BETTER): {composite_loss:.4f}\")\n",
+            "print(f\"  LEGACY COMPOSITE RAW:          {composite_raw:.4f}\")\n",
             "print(\"=\" * 50)\n"
         ]
     })

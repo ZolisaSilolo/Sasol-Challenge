@@ -1,0 +1,37 @@
+# Fast CPU smoke config (local laptop / Codespace). Same architecture, smaller ensembles.
+extends: base_config.yaml
+
+embeddings:
+  model_name: sentence-transformers/all-MiniLM-L6-v2
+
+heads:
+  fuel:
+    engines:
+      lgbm: {n_estimators: 150, learning_rate: 0.06, num_leaves: 31}
+      catboost: {iterations: 200, learning_rate: 0.1, depth: 6}
+      xgboost: {n_estimators: 150, learning_rate: 0.06, max_depth: 5}
+    aux_huber:
+      engine: lgbm
+      params: {n_estimators: 150, learning_rate: 0.06, num_leaves: 31}
+  nonfuel:
+    engines:
+      lgbm: {n_estimators: 150, learning_rate: 0.06, num_leaves: 31}
+      catboost: {iterations: 200, learning_rate: 0.1, depth: 6}
+      xgboost: {n_estimators: 150, learning_rate: 0.06, max_depth: 5}
+    hurdle:
+      classifier_engines: [lgbm]
+      regressor_engines: [catboost]
+      classifier_params:
+        lgbm: {n_estimators: 150, learning_rate: 0.06}
+      regressor_params:
+        catboost: {iterations: 200, learning_rate: 0.1, depth: 6}
+  opportunity:
+    engines:
+      lgbm: {n_estimators: 120, learning_rate: 0.08, num_leaves: 15}
+      catboost: {iterations: 200, learning_rate: 0.15, depth: 5}
+      xgboost: {n_estimators: 120, learning_rate: 0.08, max_depth: 4}
+
+postprocessing:
+  class_weights:
+    grid_size: 15
+    max_passes: 2
