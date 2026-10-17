@@ -214,7 +214,7 @@ def inspect_pipeline_metrics(filepath: str = "submissions/oof_metrics_fast.json"
     }
 
 
-def audit_submission_file(filepath: str = "submissions/submission_baseline.csv") -> Dict[str, Any]:
+def audit_submission_file(filepath: str = "submissions/submission_fast.csv") -> Dict[str, Any]:
     """Audits a generated competition submission CSV against the strict Sasol evaluation contract.
 
     Use this tool to validate any submission file before uploading to Zindi, or to inspect
