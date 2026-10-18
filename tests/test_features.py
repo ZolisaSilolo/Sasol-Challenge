@@ -107,3 +107,25 @@ def test_embeddings_deduplicate_texts(tx, label_config, monkeypatch, tmp_path):
 def test_opportunity_descriptions_cover_all_classes(label_config):
     d = emb.opportunity_descriptions(label_config["opportunity_labels"])
     assert set(d) == set(label_config["opportunity_labels"]) and all(d.values())
+
+
+@pytest.mark.parametrize("cutoff", ["2025-03-01", "2025-06-01"])
+def test_rule_replay_matches_label_rules(store, tx, label_config, cutoff):
+    """lag1_* replays label_rules on [t-3m, t): must equal raw_labels(t-3m) for every eligible customer."""
+    feats = build_features(tx, cutoff, label_config).to_pandas().set_index("ID")
+    lag_cut = str((pd.Timestamp(cutoff) - pd.DateOffset(months=3)).date())
+    ref = store.rules.raw_labels(store._prepared(), lag_cut, label_config).set_index("ID")
+    ref.index = ref.index.astype(str)
+    classes = label_config["opportunity_labels"]
+    mine = feats.lag1_label_idx[feats.lag1_label_idx >= 0].astype(int).map(lambda i: classes[i])
+    assert set(mine.index) == set(ref.index)
+    pd.testing.assert_series_equal(mine.sort_index(), ref.Opportunity.sort_index(), check_names=False)
+    assert (feats.lag1_label_idx >= 0).sum() > 0 and (feats.lag2_label_idx >= 0).sum() > 0
+
+
+def test_rule_replay_and_hurdle_features_present(feats):
+    cols = set(feats.columns)
+    for c in ("lag1_label_idx", "lag1_kind", "lag2_label_idx", "lag_label_repeat", "lag_growth_count",
+              "grow_hurdle__fuel", "grow_gap_max__fuel", "grow_gap_max__other", "q1_over_q2__beverages",
+              "cv_spend_monthly", "cv_visits_monthly"):
+        assert c in cols, c
