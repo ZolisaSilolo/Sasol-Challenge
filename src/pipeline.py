@@ -238,6 +238,17 @@ def fit_stack(train: Dataset, others: Dict[str, Dataset], cfg: dict, classes: Li
               for o in others}
     report["fuel"] = {"members": {n: rmse(train.y_fuel, P[:, i]) for i, n in enumerate(names)},
                       "blend_weights": dict(zip(names, wf.round(4).tolist())), "oof_rmse": rmse(train.y_fuel, fuel_oof)}
+    if fcfg.get("optimize_zero_threshold", False):
+        from scipy.optimize import minimize_scalar
+        res_f = minimize_scalar(lambda t: rmse(train.y_fuel, np.where(fuel_oof < t, 0.0, fuel_oof)),
+                                bounds=(0.0, 0.25), method="bounded")
+        if res_f.fun < rmse(train.y_fuel, fuel_oof) - 1e-5:
+            t_opt_f = float(res_f.x)
+            logger.info(f"Head 1 zero threshold {t_opt_f:.4f} drops OOF RMSE {rmse(train.y_fuel, fuel_oof):.5f} -> {res_f.fun:.5f}")
+            fuel_oof = np.where(fuel_oof < t_opt_f, 0.0, fuel_oof)
+            fuel_o = {o: np.where(v < t_opt_f, 0.0, v) for o, v in fuel_o.items()}
+            report["fuel"]["zero_threshold"] = t_opt_f
+            report["fuel"]["oof_rmse"] = float(res_f.fun)
     logger.info(f"Head 1 blend {report['fuel']['blend_weights']} -> OOF RMSE {report['fuel']['oof_rmse']:.5f}")
 
     # ------------------------------------------------------------------ Head 2: non-fuel
@@ -269,6 +280,17 @@ def fit_stack(train: Dataset, others: Dict[str, Dataset], cfg: dict, classes: Li
     report["nonfuel"] = {"members": {n: rmse(train.y_nonfuel, P[:, i]) for i, n in enumerate(names)},
                          "blend_weights": dict(zip(names, wn.round(4).tolist())),
                          "oof_rmse": rmse(train.y_nonfuel, nonfuel_oof), "stage2a_oof_auc": auc}
+    if ncfg.get("optimize_zero_threshold", True):
+        from scipy.optimize import minimize_scalar
+        res_n = minimize_scalar(lambda t: rmse(train.y_nonfuel, np.where(nonfuel_oof < t, 0.0, nonfuel_oof)),
+                                bounds=(0.0, 0.35), method="bounded")
+        if res_n.fun < rmse(train.y_nonfuel, nonfuel_oof) - 1e-5:
+            t_opt_n = float(res_n.x)
+            logger.info(f"Head 2 zero threshold {t_opt_n:.4f} drops OOF RMSE {rmse(train.y_nonfuel, nonfuel_oof):.5f} -> {res_n.fun:.5f}")
+            nonfuel_oof = np.where(nonfuel_oof < t_opt_n, 0.0, nonfuel_oof)
+            nonfuel_o = {o: np.where(v < t_opt_n, 0.0, v) for o, v in nonfuel_o.items()}
+            report["nonfuel"]["zero_threshold"] = t_opt_n
+            report["nonfuel"]["oof_rmse"] = float(res_n.fun)
     logger.info(f"Head 2 blend {report['nonfuel']['blend_weights']} -> OOF RMSE {report['nonfuel']['oof_rmse']:.5f} "
                 f"| P(z>0) AUC {auc:.4f}")
 

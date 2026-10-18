@@ -70,14 +70,14 @@ KIND_CODES = {"Ineligible": 0, "Inactivity": 1, "Stable": 2, "Existing-category 
 GROWTH_GROUPS = ("Fuel", "Beverages", "Food & beverage")   # every other growth category maps to "Other"
 
 
-def rule_state(h: pl.DataFrame, end: datetime, label_config: dict, prefix: str) -> pl.DataFrame:
-    """Replay label_rules.raw_labels on a *past* window: outcome [end-3m, end), baseline [end-6m, end-3m),
-    history < end-3m. With end <= cutoff this uses pre-cutoff rows only, so it is leak-free.
+def rule_per_category(h: pl.DataFrame, end: datetime, label_config: dict) -> tuple[pl.DataFrame, pl.DataFrame]:
+    """label_rules candidate logic for outcome [end-3m, end), baseline [end-6m, end-3m), history < end-3m.
 
-    ``h`` must already be filtered to ts < cutoff and carry the flags built in build_features.
-    Returns one row per eligible customer (>= minimum_historical_transactions baskets before end-3m).
+    ``h`` needs ID, TransactionId, ts, cat, amount, in_scope, qual for rows with ts < end.
+    Returns (eligible IDs, per (ID, cat) frame with hist, fut_n, fut, prev, gv (growth increment
+    when the category qualifies for growth, else 0) and av (adoption increment, else 0)).
     """
-    cfg, mapping = label_config, label_config["category_mapping"]
+    cfg = label_config
     start = (pd.Timestamp(end) - pd.DateOffset(months=3)).to_pydatetime()
     base_start = (pd.Timestamp(end) - pd.DateOffset(months=6)).to_pydatetime()
     elig = (h.filter(pl.col("ts") < start).group_by(ID).agg(pl.col("TransactionId").n_unique().alias("n"))
@@ -100,6 +100,18 @@ def rule_state(h: pl.DataFrame, end: datetime, label_config: dict, prefix: str) 
         pl.when(grow).then(pl.col("fut") - pl.col("prev")).otherwise(0.0).alias("gv"),
         pl.when(adopt).then(pl.col("fut")).otherwise(0.0).alias("av"),
     )
+    return elig, per_cat
+
+
+def rule_state(h: pl.DataFrame, end: datetime, label_config: dict, prefix: str) -> pl.DataFrame:
+    """Replay label_rules.raw_labels on a *past* window: outcome [end-3m, end), baseline [end-6m, end-3m),
+    history < end-3m. With end <= cutoff this uses pre-cutoff rows only, so it is leak-free.
+
+    ``h`` must already be filtered to ts < cutoff and carry the flags built in build_features.
+    Returns one row per eligible customer (>= minimum_historical_transactions baskets before end-3m).
+    """
+    mapping = label_config["category_mapping"]
+    elig, per_cat = rule_per_category(h, end, label_config)
 
     def best(col: str, kind: str) -> pl.DataFrame:   # argmax per customer, ties -> first category (as numpy)
         top = (per_cat.filter(pl.col(col) > 0).sort([ID, col, "cat"], descending=[False, True, False])

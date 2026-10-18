@@ -1,0 +1,45 @@
+# V2 GCP production config targeting competitive dominance across all 3 heads:
+# - Head 1 (Fuel): Deeper tree capacity (leaves 25, depth 5-6) + zero thresholding
+# - Head 2 (Non-Fuel): Hurdle + direct ensemble + OOF-calibrated zero-thresholding
+# - Head 3 (Opportunity): class_weight_power=0.35 + Powell class multiplier refinement
+extends: fast_monthly_config.yaml
+
+embeddings:
+  enabled: false
+
+heads:
+  fuel:
+    optimize_zero_threshold: true
+    engines:
+      lgbm: {n_estimators: 450, learning_rate: 0.02, num_leaves: 25, min_child_samples: 60, colsample_bytree: 0.35}
+      catboost: {iterations: 900, learning_rate: 0.035, depth: 6, rsm: 0.35, l2_leaf_reg: 5.0}
+      xgboost: {n_estimators: 450, learning_rate: 0.02, max_depth: 5, min_child_weight: 25, colsample_bytree: 0.35}
+    aux_huber:
+      engine: lgbm
+      params: {n_estimators: 450, learning_rate: 0.02, num_leaves: 25, min_child_samples: 60, colsample_bytree: 0.35}
+  nonfuel:
+    optimize_zero_threshold: true
+    engines:
+      lgbm: {n_estimators: 450, learning_rate: 0.02, num_leaves: 15, min_child_samples: 100, colsample_bytree: 0.3}
+      catboost: {iterations: 800, learning_rate: 0.04, depth: 5, rsm: 0.3, l2_leaf_reg: 6.0}
+      xgboost: {n_estimators: 450, learning_rate: 0.02, max_depth: 4, min_child_weight: 30, colsample_bytree: 0.3}
+    hurdle:
+      classifier_params:
+        lgbm: {n_estimators: 450, learning_rate: 0.02, num_leaves: 15, min_child_samples: 100, colsample_bytree: 0.3}
+      regressor_params:
+        catboost: {iterations: 800, learning_rate: 0.04, depth: 5, rsm: 0.3, l2_leaf_reg: 6.0}
+  opportunity:
+    class_weight_power: 0.35
+    engines:
+      lgbm: {n_estimators: 550, learning_rate: 0.02, num_leaves: 20, min_child_samples: 150, colsample_bytree: 0.35}
+      catboost: {iterations: 700, learning_rate: 0.05, depth: 5, rsm: 0.35, l2_leaf_reg: 5.0}
+      xgboost: {n_estimators: 550, learning_rate: 0.02, max_depth: 5, min_child_weight: 40, colsample_bytree: 0.35}
+
+postprocessing:
+  class_weights:
+    enabled: true
+    lo: 0.1
+    hi: 6.0
+    grid_size: 35
+    max_passes: 4
+    method: powell

@@ -1,0 +1,35 @@
+# fast_monthly_config + regularised trees, tuned with scripts/remote_sweep.sh (OOT harness,
+# single LGBM, monthly cohorts, mean of OOT @ 2025-09-01 & 2025-06-01):
+#   regressors : num_leaves 15, min_child_samples 100, colsample 0.3, 400 trees @ lr 0.02
+#   classifier : num_leaves 15, min_child_samples 200, colsample 0.3, 500 trees @ lr 0.02
+#   harness composite 0.6016 (monthly, fast-style trees) -> ~0.598; embeddings hurt wF1 (0.5097 -> 0.5048).
+# CatBoost / XGBoost get the analogous regularisation (shallower, column subsampling, larger leaves).
+extends: fast_monthly_config.yaml
+
+embeddings:
+  enabled: false
+
+heads:
+  fuel:
+    engines:
+      lgbm: {n_estimators: 400, learning_rate: 0.02, num_leaves: 15, min_child_samples: 100, colsample_bytree: 0.3}
+      catboost: {iterations: 800, learning_rate: 0.04, depth: 5, rsm: 0.3, l2_leaf_reg: 6.0}
+      xgboost: {n_estimators: 400, learning_rate: 0.02, max_depth: 4, min_child_weight: 30, colsample_bytree: 0.3}
+    aux_huber:
+      engine: lgbm
+      params: {n_estimators: 400, learning_rate: 0.02, num_leaves: 15, min_child_samples: 100, colsample_bytree: 0.3}
+  nonfuel:
+    engines:
+      lgbm: {n_estimators: 400, learning_rate: 0.02, num_leaves: 15, min_child_samples: 100, colsample_bytree: 0.3}
+      catboost: {iterations: 800, learning_rate: 0.04, depth: 5, rsm: 0.3, l2_leaf_reg: 6.0}
+      xgboost: {n_estimators: 400, learning_rate: 0.02, max_depth: 4, min_child_weight: 30, colsample_bytree: 0.3}
+    hurdle:
+      classifier_params:
+        lgbm: {n_estimators: 400, learning_rate: 0.02, num_leaves: 15, min_child_samples: 100, colsample_bytree: 0.3}
+      regressor_params:
+        catboost: {iterations: 800, learning_rate: 0.04, depth: 5, rsm: 0.3, l2_leaf_reg: 6.0}
+  opportunity:
+    engines:
+      lgbm: {n_estimators: 500, learning_rate: 0.02, num_leaves: 15, min_child_samples: 200, colsample_bytree: 0.3}
+      catboost: {iterations: 600, learning_rate: 0.06, depth: 5, rsm: 0.3, l2_leaf_reg: 6.0}
+      xgboost: {n_estimators: 500, learning_rate: 0.02, max_depth: 4, min_child_weight: 50, colsample_bytree: 0.3}

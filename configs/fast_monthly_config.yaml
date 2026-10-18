@@ -1,0 +1,20 @@
+# fast_config + month-start augmentation cohorts (2024-05 ... 2025-08) on top of the five
+# quarterly calibration cutoffs. ~3x training rows; OOT still evaluates 2025-09-01 with purged
+# training cohorts, and GroupKFold on ID keeps a customer's overlapping cohorts in one fold.
+# Harness (single LGBM, OOT @ 2025-09-01 & 2025-06-01): composite 0.6041 -> 0.6016.
+extends: fast_config.yaml
+
+cohorts:
+  extra_monthly_cutoffs:
+    - "2024-05-01"
+    - "2024-06-01"
+    - "2024-07-01"
+    - "2024-08-01"
+    - "2024-10-01"
+    - "2024-11-01"
+    - "2025-01-01"
+    - "2025-02-01"
+    - "2025-04-01"
+    - "2025-05-01"
+    - "2025-07-01"
+    - "2025-08-01"
