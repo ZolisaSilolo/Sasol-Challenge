@@ -79,6 +79,7 @@ def main():
     ap.add_argument("--clf-colsample", type=float, default=None)
     ap.add_argument("--emb", action="store_true")
     ap.add_argument("--catmeta", action="store_true")
+    ap.add_argument("--ctx", action="store_true", help="add src/context_features (station context, fuel grades)")
     ap.add_argument("--cm-n", type=int, default=250)
     ap.add_argument("--cm-min-pos", type=int, default=150)
     ap.add_argument("--jobs", type=int, default=4)
@@ -89,6 +90,15 @@ def main():
     cuts = sorted(set(lc_cuts + (month_starts(a.first, "2025-09-01") if a.monthly else [])))
     store, labels, frames = load(cuts, a.emb)
     outcomes = load_outcomes(store, cuts) if a.catmeta else None
+    if a.ctx:
+        from src.context_features import CTX_VERSION, context_features
+        tx = None
+        for c in cuts:
+            path = store.cache_path(f"ctx_{CTX_VERSION}_{c}")
+            if not path.exists():
+                tx = tx if tx is not None else store.transactions()
+                context_features(tx, c).write_parquet(path)
+            frames[c] = frames[c].merge(pl.read_parquet(path).to_pandas(), on=ID, how="left")
     lc = store.label_config
     classes = lc["opportunity_labels"]
     cmap = {c: i for i, c in enumerate(classes)}
