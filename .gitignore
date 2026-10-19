@@ -22,11 +22,7 @@ data/raw/*
 data/processed/*
 !data/processed/.gitkeep
 
-# Model artefacts
-models/*.pkl
-models/*.cbm
-models/*.json
-models/*.txt
+# Model training side-outputs
 catboost_info/
 
 # Bundles / archives

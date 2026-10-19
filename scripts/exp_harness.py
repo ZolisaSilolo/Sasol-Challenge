@@ -61,6 +61,59 @@ def assemble(labels, frames, cuts, outcomes=None):
     return pd.concat(parts, ignore_index=True)
 
 
+def lb_score(m) -> float:
+    """Leaderboard formula, reverse-engineered from two public scores (exact to 1e-9)."""
+    return 0.3 * (1 - m["rmse_fuel"] / 0.74) + 0.3 * (1 - m["rmse_nonfuel"] / 0.816) + 0.4 * m["f1_opportunity"]
+
+
+def partial_z(tx: pl.DataFrame, lc: dict, start, end) -> pd.DataFrame:
+    """CLV targets (z-scale) over [start, end), with label_rules definitions."""
+    inc = [c for c, v in lc["category_mapping"].items() if v["included"]]
+    w = tx.filter((pl.col("ts") >= start) & (pl.col("ts") < end) & ~pl.col("is_adjustment")).with_columns(
+        pl.col("ItemCategoryLevel2").cast(pl.String).alias("cat"))
+    g = w.group_by(ID).agg(
+        pl.col("qty").filter((pl.col("cat") == "Fuel") & (pl.col("LineItemType").cast(pl.String) == "Sale_Fuel")).sum().alias("f"),
+        pl.col("amount").filter(pl.col("cat").is_in(inc) & (pl.col("cat") != "Fuel")).sum().alias("n"))
+    s = lc["normalization"]
+    return g.with_columns(pl.col(ID).cast(pl.String),
+                          (pl.col("f").clip(lower_bound=0).log1p() / s["CLV_fuel"]).alias("pz_f"),
+                          (pl.col("n").clip(lower_bound=0).log1p() / s["CLV_nonfuel"]).alias("pz_n")
+                          ).select(ID, "pz_f", "pz_n").to_pandas()
+
+
+def partial_cohort_regression(tx, lc, labels, frames, cols, tr, tr_cuts, E, p, w, pw):
+    """Impute 3-month CLV for the partially observed cohorts E-2m, E-1m (outcome truncated at E) with a model
+    trained on full cohorts using X + first-m-month partial targets, then train the CLV regressors on the
+    real rows + pseudo-labelled rows. Uses only transactions < E."""
+    import lightgbm as lgb
+    Et = pd.Timestamp(E)
+    imp_rows = []
+    for c in tr_cuts:
+        base = labels[c][[ID, "CLV_fuel", "CLV_nonfuel"]].merge(frames[c], on=ID, how="left")
+        for m in (1, 2):
+            z = partial_z(tx, lc, pd.Timestamp(c), add_months(c, m))
+            imp_rows.append(base.merge(z, on=ID, how="left").fillna({"pz_f": 0.0, "pz_n": 0.0}).assign(pm=m))
+    imp = pd.concat(imp_rows, ignore_index=True)
+    icols = cols + ["pz_f", "pz_n", "pm"]
+    mf = lgb.LGBMRegressor(**p).fit(imp[icols].to_numpy(np.float32), imp.CLV_fuel)
+    mn = lgb.LGBMRegressor(**p).fit(imp[icols].to_numpy(np.float32), imp.CLV_nonfuel)
+    pse = []
+    for m in (1, 2):
+        c = (Et - pd.DateOffset(months=m)).strftime("%Y-%m-%d")
+        ids = labels[c][[ID]]                      # eligibility uses pre-cutoff history only
+        d = ids.merge(frames[c], on=ID, how="left").merge(partial_z(tx, lc, pd.Timestamp(c), Et), on=ID, how="left")
+        d = d.fillna({"pz_f": 0.0, "pz_n": 0.0}).assign(pm=m)
+        Z = d[icols].to_numpy(np.float32)
+        d["CLV_fuel"], d["CLV_nonfuel"] = mf.predict(Z).clip(0), mn.predict(Z).clip(0)
+        pse.append(d)
+    pse = pd.concat(pse, ignore_index=True)
+    X = np.vstack([tr[cols].to_numpy(np.float32), pse[cols].to_numpy(np.float32)])
+    ww = np.concatenate([w, np.full(len(pse), pw)])
+    rf = lgb.LGBMRegressor(**p).fit(X, np.concatenate([tr.CLV_fuel, pse.CLV_fuel]), sample_weight=ww)
+    rn = lgb.LGBMRegressor(**p).fit(X, np.concatenate([tr.CLV_nonfuel, pse.CLV_nonfuel]), sample_weight=ww)
+    return rf, rn, len(pse)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--exp", default="base")
@@ -80,6 +133,9 @@ def main():
     ap.add_argument("--emb", action="store_true")
     ap.add_argument("--catmeta", action="store_true")
     ap.add_argument("--ctx", action="store_true", help="add src/context_features (station context, fuel grades)")
+    ap.add_argument("--surv", action="store_true", help="add src/survival_features (gap-survival churn)")
+    ap.add_argument("--partial", action="store_true", help="pseudo-labelled partial cohorts (E-2m, E-1m) for CLV heads")
+    ap.add_argument("--partial-w", type=float, default=1.0)
     ap.add_argument("--cm-n", type=int, default=250)
     ap.add_argument("--cm-min-pos", type=int, default=150)
     ap.add_argument("--jobs", type=int, default=4)
@@ -99,11 +155,20 @@ def main():
                 tx = tx if tx is not None else store.transactions()
                 context_features(tx, c).write_parquet(path)
             frames[c] = frames[c].merge(pl.read_parquet(path).to_pandas(), on=ID, how="left")
+    if a.surv:
+        from src.survival_features import SURV_VERSION, survival_features
+        tx = None
+        for c in cuts:
+            path = store.cache_path(f"surv_{SURV_VERSION}_{c}")
+            if not path.exists():
+                tx = tx if tx is not None else store.transactions()
+                survival_features(tx, c, store.label_config).write_parquet(path)
+            frames[c] = frames[c].merge(pl.read_parquet(path).to_pandas(), on=ID, how="left")
     lc = store.label_config
     classes = lc["opportunity_labels"]
     cmap = {c: i for i, c in enumerate(classes)}
     cols = sorted(set.intersection(*[set(f.columns) for f in frames.values()]) - {ID})
-    res = []
+    res, ptx = [], None
     for E in a.evals.split(","):
         tr_cuts = [c for c in cuts if add_months(c, 3) <= pd.Timestamp(E)]
         tr, te = assemble(labels, frames, tr_cuts, outcomes), assemble(labels, frames, [E], outcomes)
@@ -147,11 +212,23 @@ def main():
             m.update(eval=E, variant=v, n_train=len(tr), secs=round(time.time() - t0))
             res.append(m)
             print(f"[{a.exp}/{v}] {E} n={len(tr)} fuel={m['rmse_fuel']:.4f} nf={m['rmse_nonfuel']:.4f} "
-                  f"f1={m['f1_opportunity']:.4f} comp={m['composite_loss']:.4f} ({m['secs']}s)", flush=True)
+                  f"f1={m['f1_opportunity']:.4f} comp={m['composite_loss']:.4f} lb={lb_score(m):.4f} ({m['secs']}s)", flush=True)
+            if v == "base":
+                P_base = P
+        if a.partial:
+            t0 = time.time()
+            ptx = ptx if ptx is not None else store.transactions()
+            pf, pn, npse = partial_cohort_regression(ptx, lc, labels, frames, cols, tr, tr_cuts, E, p, w, a.partial_w)
+            m = composite_metric(te.CLV_fuel, pf.predict(Xte).clip(0), te.CLV_nonfuel, pn.predict(Xte).clip(0),
+                                 te.Opportunity.map(cmap), P_base.argmax(1))
+            m.update(eval=E, variant="partial", n_train=len(tr) + npse, secs=round(time.time() - t0))
+            res.append(m)
+            print(f"[{a.exp}/partial] {E} n={len(tr)}+{npse} fuel={m['rmse_fuel']:.4f} nf={m['rmse_nonfuel']:.4f} "
+                  f"f1={m['f1_opportunity']:.4f} comp={m['composite_loss']:.4f} lb={lb_score(m):.4f} ({m['secs']}s)", flush=True)
     r = pd.DataFrame(res)
     for v, g in r.groupby("variant", sort=False):
         print(f"[{a.exp}/{v}] MEAN fuel={g.rmse_fuel.mean():.4f} nf={g.rmse_nonfuel.mean():.4f} "
-              f"f1={g.f1_opportunity.mean():.4f} comp={g.composite_loss.mean():.4f}")
+              f"f1={g.f1_opportunity.mean():.4f} comp={g.composite_loss.mean():.4f} lb={g.apply(lb_score, axis=1).mean():.4f}")
 
 
 if __name__ == "__main__":

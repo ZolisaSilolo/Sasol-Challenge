@@ -66,7 +66,7 @@ gcp-run: ## Full cycle: up -> train -> down (VM is stopped even if up/training f
 	bash $(GCP) down; exit $$rc
 
 
-gcp-run-cpu: ## Full cycle on a 32-vCPU Spot CPU VM (no GPU quota needed)
+gcp-run-cpu: ## Full cycle on a Spot CPU VM (no GPU quota needed)
 	@GCE_MODE=cpu bash $(GCP) up; rc=$$?; \
 	if [ $$rc -eq 0 ]; then GCE_MODE=cpu bash $(GCP) train; rc=$$?; fi; \
 	GCE_MODE=cpu bash $(GCP) down; bash scripts/session_sync.sh push || true; exit $$rc

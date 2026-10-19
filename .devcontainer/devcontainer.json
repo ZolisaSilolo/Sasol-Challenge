@@ -1,6 +1,5 @@
 {
   "name": "Sasol-Challenge",
   "image": "mcr.microsoft.com/devcontainers/python:3.12",
-  "postCreateCommand": "pip install -r requirements.txt",
-  "postStartCommand": "bash scripts/session_sync.sh pull || echo '[sessions] restore skipped (gcloud not authenticated yet: run gcloud auth login, then make sessions-pull)'"
+  "postCreateCommand": "pip install -r requirements.txt"
 }

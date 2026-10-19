@@ -135,6 +135,8 @@ def test_validate_submission_rejects_bad(classes, mutate, msg):
         validate_submission(mutate(s.copy()), s[["ID"]], classes, expected_rows=5)
 
 
+@pytest.mark.skipif(not (REPO / "data/raw/SampleSubmission.csv").exists(),
+                    reason="organiser SampleSubmission.csv not in data/raw/")
 def test_real_sample_submission_shape(classes):
     sample = pd.read_csv(REPO / "data/raw/SampleSubmission.csv", dtype={"ID": str})
     assert sample.shape == (5488, 4)
@@ -201,7 +203,9 @@ def test_end_to_end_pipeline(synth_raw, tmp_path):
 ])
 def test_gcp_cluster_dry_run(cmd, expect, synth_raw, tmp_path):
     cmd, _, mode = cmd.partition(":")
-    env = {**os.environ, "DRY_RUN": "1", "GCE_MODE": mode or "gpu", "GCP_PROJECT_ID": "dry-run-project", "GCS_BUCKET_URI": "",
+    # Drop any GCP settings exported by the developer's shell so the script's defaults are tested.
+    base = {k: v for k, v in os.environ.items() if not k.startswith(("GCE_", "GCP_", "GCS_"))}
+    env = {**base, "DRY_RUN": "1", "GCE_MODE": mode or "gpu", "GCP_PROJECT_ID": "dry-run-project", "GCS_BUCKET_URI": "",
            "GCP_ENV_FILE": str(tmp_path / "absent.env"), "RAW_DIR": str(synth_raw), "RUN_ID": "T1"}
     r = subprocess.run(["bash", "scripts/gcp_cluster.sh", cmd], cwd=REPO, env=env, capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
